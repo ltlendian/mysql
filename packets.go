@@ -17,6 +17,7 @@ import (
 	"io"
 	"math"
 	"time"
+	"strconv"
 )
 
 // Packets documentation:
@@ -606,22 +607,58 @@ func (rows *textRows) readRow(dest []driver.Value) error {
 		pos += n
 		if err == nil {
 			if !isNull {
-				if !mc.parseTime {
+				if i >= len(rows.columns) {
 					continue
-				} else {
-					switch rows.columns[i].fieldType {
+				}
+				strval := string(dest[i].([]byte))
+				switch rows.columns[i].fieldType {
 					case fieldTypeTimestamp, fieldTypeDateTime,
 						fieldTypeDate, fieldTypeNewDate:
+						if !mc.parseTime {
+							continue
+						}
 						dest[i], err = parseDateTime(
-							string(dest[i].([]byte)),
+							strval,
 							mc.cfg.loc,
 						)
 						if err == nil {
 							continue
 						}
+					case fieldTypeFloat, fieldTypeDouble /*, fieldTypeDecimal, fieldTypeNewDecimal*/:
+						bitLen := 64
+						if rows.columns[i].fieldType == fieldTypeFloat { bitLen = 32 }
+						if myfloat, err := strconv.ParseFloat(string(strval), bitLen); err == nil {
+							dest[i] = float64(myfloat)
+							continue
+						}
+					case fieldTypeTiny, fieldTypeShort, fieldTypeYear, fieldTypeLong, fieldTypeInt24, fieldTypeLongLong:
+						bitLen := 64
+						switch rows.columns[i].fieldType {
+							case fieldTypeTiny:
+								bitLen = 8
+							case fieldTypeShort, fieldTypeYear:
+								bitLen = 16
+							case fieldTypeLong, fieldTypeInt24 :
+								bitLen = 32
+							default:
+								bitLen = 64
+						}
+						if rows.columns[i].flags & flagUnsigned != 0 {
+							myint, err := strconv.ParseUint(strval, 10, bitLen)
+							if err == nil {
+								dest[i] = int64(uint64(myint))
+								continue
+							}
+						} else {
+							myint, err := strconv.ParseInt(strval, 10, bitLen)
+							if err == nil {
+								dest[i] = int64(myint)
+								continue
+							}
+						}
+
 					default:
 						continue
-					}
 				}
 
 			} else {
